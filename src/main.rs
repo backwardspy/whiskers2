@@ -149,7 +149,10 @@ fn render_multi_file(
         let filename = tera::Tera::one_off(filename_template, &ctx, false)?;
 
         if dry_run || cfg!(test) {
-            println!("would write {} bytes into {filename}", result.len());
+            println!(
+                "would write {} bytes into {filename}",
+                result.as_bytes().len()
+            );
         } else {
             std::fs::write(filename, result)?;
         }
