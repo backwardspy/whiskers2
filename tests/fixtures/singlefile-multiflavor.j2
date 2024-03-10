@@ -1,0 +1,8 @@
+---
+accent: mauve
+---
+{% for _, flavor in flavors %}
+# Catppuccin {{flavor.name}}
+[theme]
+{{accent}}: #{{flavor.colors[accent].hex}}
+{% endfor %}
