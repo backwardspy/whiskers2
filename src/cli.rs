@@ -1,4 +1,7 @@
-use std::{collections::HashMap, path::PathBuf};
+use std::{
+    collections::HashMap,
+    path::{Path, PathBuf},
+};
 
 use clap::Parser;
 
@@ -25,6 +28,9 @@ impl From<Flavor> for catppuccin::FlavorName {
 enum Error {
     #[error(transparent)]
     Json(#[from] serde_json::Error),
+
+    #[error(transparent)]
+    Io(#[from] std::io::Error),
 }
 
 #[derive(Clone, Debug, serde::Deserialize)]
@@ -45,7 +51,12 @@ fn json_map<T>(s: &str) -> Result<T, Error>
 where
     T: serde::de::DeserializeOwned,
 {
-    serde_json::from_str(s).map_err(Into::into)
+    if Path::new(s).is_file() {
+        let s = std::fs::read_to_string(s)?;
+        serde_json::from_str(&s).map_err(Into::into)
+    } else {
+        serde_json::from_str(s).map_err(Into::into)
+    }
 }
 
 type ValueMap = HashMap<String, serde_json::Value>;
