@@ -60,16 +60,24 @@ fn main() -> anyhow::Result<()> {
     let template_opts =
         TemplateOptions::from_frontmatter(&doc.frontmatter, args.flavor.map(Into::into))?;
 
+    let whiskers_version = semver::Version::parse(env!("CARGO_PKG_VERSION"))?;
     if let Some(template_version) = template_opts.version {
-        const WHISKERS_VERSION: &str = env!("CARGO_PKG_VERSION");
-        let whiskers_version = semver::Version::parse(WHISKERS_VERSION)?;
         if !template_version.matches(&whiskers_version) {
             anyhow::bail!(
                 "Template requires whiskers version {template_version}, but we're running {whiskers_version}",
             );
         }
     } else {
-        eprintln!("Warning: No Whiskers version requirement specified in template");
+        eprintln!("Warning: No Whiskers version requirement specified in template.");
+        eprintln!("This template may not be compatible with this version of Whiskers.");
+        eprintln!();
+        eprintln!("To fix this, add the minimum supported Whiskers version to the template frontmatter as follows:");
+        eprintln!();
+        eprintln!("    ---");
+        eprintln!("    whiskers:");
+        eprintln!("        version: \"{whiskers_version}\"");
+        eprintln!("    ---");
+        eprintln!();
     }
 
     let palette = models::build_palette(args.hexcaps);
