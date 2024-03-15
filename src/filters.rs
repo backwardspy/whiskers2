@@ -1,4 +1,9 @@
-use std::collections::HashMap;
+use std::{
+    collections::{BTreeMap, HashMap},
+    io::Write,
+};
+
+use base64::Engine as _;
 
 use crate::models::Color;
 
@@ -66,4 +71,30 @@ pub fn sub(
     } else {
         Ok(value.clone())
     }
+}
+
+pub fn urlencode_lzma(
+    value: &tera::Value,
+    _args: &HashMap<String, tera::Value>,
+) -> Result<tera::Value, tera::Error> {
+    // encode the data with the following process:
+    // 1. messagepack the data
+    // 2. compress the messagepacked data with lzma (v1, preset 9)
+    // 3. urlsafe base64 encode the compressed data
+    let value: BTreeMap<String, tera::Value> = tera::from_value(value.clone())?;
+    let packed = rmp_serde::to_vec(&value).map_err(|e| tera::Error::msg(e.to_string()))?;
+    let mut options = lzma_rust::LZMA2Options::with_preset(9);
+    options.dict_size = lzma_rust::LZMA2Options::DICT_SIZE_DEFAULT;
+    let mut compressed = Vec::new();
+    let mut writer = lzma_rust::LZMAWriter::new(
+        lzma_rust::CountingWriter::new(&mut compressed),
+        &options,
+        true,
+        false,
+        Some(packed.len() as u64),
+    )?;
+    writer.write_all(&packed)?;
+    let _ = writer.write(&[])?;
+    let encoded = base64::engine::general_purpose::URL_SAFE.encode(compressed);
+    Ok(tera::to_value(encoded)?)
 }

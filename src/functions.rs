@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 
 use crate::models::Color;
 
@@ -40,4 +40,10 @@ pub fn if_fn(args: &HashMap<String, tera::Value>) -> Result<tera::Value, tera::E
         .clone();
 
     Ok(if cond { t } else { f })
+}
+
+pub fn object(args: &HashMap<String, tera::Value>) -> Result<tera::Value, tera::Error> {
+    // sorting the args gives us stable output
+    let args: BTreeMap<_, _> = args.iter().collect();
+    Ok(tera::to_value(args)?)
 }
