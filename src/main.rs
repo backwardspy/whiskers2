@@ -8,32 +8,36 @@ use whiskers2::{
     models, templating,
 };
 
-const FRONTMATTER_OPTS_SECTION: &str = "whiskers";
+const FRONTMATTER_OPTIONS_SECTION: &str = "whiskers";
 
 #[derive(Default, Debug, serde::Deserialize)]
-struct RenderOpts {
+struct TemplateOptions {
+    version: Option<semver::VersionReq>,
     matrix: Option<Matrix>,
     filename: Option<String>,
 }
 
-impl RenderOpts {
+impl TemplateOptions {
     fn from_frontmatter(
         frontmatter: &HashMap<String, tera::Value>,
         only_flavor: Option<FlavorName>,
     ) -> anyhow::Result<Self> {
+        // a `TemplateOptions` object before matrix transformation
         #[derive(serde::Deserialize)]
-        struct TemplateRenderOpts {
+        struct RawTemplateOptions {
+            version: Option<semver::VersionReq>,
             matrix: Option<Vec<tera::Value>>,
             filename: Option<String>,
         }
 
-        if let Some(opts) = frontmatter.get(FRONTMATTER_OPTS_SECTION) {
-            let opts: TemplateRenderOpts = tera::from_value(opts.clone())?;
+        if let Some(opts) = frontmatter.get(FRONTMATTER_OPTIONS_SECTION) {
+            let opts: RawTemplateOptions = tera::from_value(opts.clone())?;
             let matrix = opts
                 .matrix
                 .map(|m| matrix::from_values(m, only_flavor))
                 .transpose()?;
             Ok(Self {
+                version: opts.version,
                 matrix,
                 filename: opts.filename,
             })
@@ -52,7 +56,21 @@ fn main() -> anyhow::Result<()> {
     let template_name = template_name.to_string_lossy().into_owned();
 
     let doc = whiskers2::frontmatter::parse(&std::fs::read_to_string(&args.template_path)?)?;
-    let render_opts = RenderOpts::from_frontmatter(&doc.frontmatter, args.flavor.map(Into::into))?;
+
+    let template_opts =
+        TemplateOptions::from_frontmatter(&doc.frontmatter, args.flavor.map(Into::into))?;
+
+    if let Some(template_version) = template_opts.version {
+        const WHISKERS_VERSION: &str = env!("CARGO_PKG_VERSION");
+        let whiskers_version = semver::Version::parse(WHISKERS_VERSION)?;
+        if !template_version.matches(&whiskers_version) {
+            anyhow::bail!(
+                "Template requires whiskers version {template_version}, but we're running {whiskers_version}",
+            );
+        }
+    } else {
+        eprintln!("Warning: No Whiskers version requirement specified in template");
+    }
 
     let palette = models::build_palette(args.hexcaps);
     let mut ctx = tera::Context::new();
@@ -65,9 +83,9 @@ fn main() -> anyhow::Result<()> {
     tera.add_raw_template(&template_name, &doc.body)?;
 
     // if a matrix is provided, we're doing a multi-file render
-    if let Some(matrix) = render_opts.matrix {
-        let Some(filename_template) = render_opts.filename else {
-            anyhow::bail!("filename template is required for multi-file render");
+    if let Some(matrix) = template_opts.matrix {
+        let Some(filename_template) = template_opts.filename else {
+            anyhow::bail!("Filename template is required for multi-file render");
         };
         render_multi_file(
             matrix,
@@ -150,7 +168,7 @@ fn render_multi_file(
 
         if dry_run || cfg!(test) {
             println!(
-                "would write {} bytes into {filename}",
+                "Would write {} bytes into {filename}",
                 result.as_bytes().len()
             );
         } else {

@@ -22,6 +22,7 @@ impl From<Flavor> for catppuccin::FlavorName {
 }
 
 #[derive(Parser, Debug)]
+#[command(version, about)]
 pub struct Args {
     pub template_path: PathBuf,
 
