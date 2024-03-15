@@ -5,3 +5,4 @@ pub mod functions;
 pub mod matrix;
 pub mod models;
 pub mod templating;
+pub mod context;

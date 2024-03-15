@@ -4,7 +4,7 @@ use assert_cmd::Command;
 fn test_single() {
     let mut cmd = Command::cargo_bin("whiskers2").expect("binary exists");
     let assert = cmd
-        .args(["tests/fixtures/single/single.j2", "latte"])
+        .args(["tests/fixtures/single/single.j2", "-f", "latte"])
         .assert();
     assert
         .success()

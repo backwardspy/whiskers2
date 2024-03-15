@@ -4,6 +4,7 @@ use catppuccin::FlavorName;
 use clap::Parser as _;
 use itertools::Itertools;
 use whiskers2::{
+    context::merge_values,
     matrix::{self, Matrix},
     models, templating,
 };
@@ -48,18 +49,13 @@ impl TemplateOptions {
 }
 
 fn main() -> anyhow::Result<()> {
+    // parse command-line arguments & template frontmatter
     let args = whiskers2::cli::Args::parse();
-
-    let Some(template_name) = args.template_path.file_name() else {
-        return Err(anyhow::anyhow!("Template path must be a file"));
-    };
-    let template_name = template_name.to_string_lossy().into_owned();
-
     let doc = whiskers2::frontmatter::parse(&std::fs::read_to_string(&args.template_path)?)?;
-
     let template_opts =
         TemplateOptions::from_frontmatter(&doc.frontmatter, args.flavor.map(Into::into))?;
 
+    // check that the template is compatible with this version of Whiskers
     let whiskers_version = semver::Version::parse(env!("CARGO_PKG_VERSION"))?;
     if let Some(template_version) = template_opts.version {
         if !template_version.matches(&whiskers_version) {
@@ -73,22 +69,38 @@ fn main() -> anyhow::Result<()> {
         eprintln!();
         eprintln!("To fix this, add the minimum supported Whiskers version to the template frontmatter as follows:");
         eprintln!();
-        eprintln!("    ---");
-        eprintln!("    whiskers:");
-        eprintln!("        version: \"{whiskers_version}\"");
-        eprintln!("    ---");
+        eprintln!("---");
+        eprintln!("whiskers:");
+        eprintln!("    version: \"{whiskers_version}\"");
+        eprintln!("---");
         eprintln!();
     }
 
-    let palette = models::build_palette(args.hexcaps);
+    // merge frontmatter with command-line overrides and add to Tera context
+    let mut frontmatter = doc.frontmatter;
+    if let Some(overrides) = args.overrides {
+        for (key, value) in overrides {
+            frontmatter
+                .entry(key)
+                .and_modify(|v| {
+                    *v = merge_values(v, &value);
+                })
+                .or_insert(tera::to_value(value)?);
+        }
+    }
     let mut ctx = tera::Context::new();
-
-    for (key, value) in &doc.frontmatter {
+    for (key, value) in &frontmatter {
         ctx.insert(key, &value);
     }
 
+    // build the Tera engine and palette
     let mut tera = templating::make_engine();
+    let template_name = args.template_path.file_name().map_or_else(
+        || "template".to_string(),
+        |name| name.to_string_lossy().to_string(),
+    );
     tera.add_raw_template(&template_name, &doc.body)?;
+    let palette = models::build_palette(args.hexcaps, args.color_overrides.as_ref())?;
 
     // if a matrix is provided, we're doing a multi-file render
     if let Some(matrix) = template_opts.matrix {

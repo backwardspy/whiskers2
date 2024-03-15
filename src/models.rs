@@ -1,6 +1,8 @@
 use css_colors::Color as _;
 use indexmap::IndexMap;
 
+use crate::cli::ColorOverrides;
+
 // a frankenstein mix of Catppuccin & css_colors types to get all the
 // functionality we want.
 #[derive(serde::Serialize, serde::Deserialize, Debug, Clone)]
@@ -42,10 +44,46 @@ pub struct HSL {
     pub l: f32,
 }
 
-/// Build a [`Palette`] from [`catppuccin::PALETTE`]
-#[must_use]
-pub fn build_palette(capitalize_hex_strings: bool) -> Palette {
-    let hex = |color: &catppuccin::Color| {
+#[derive(Debug, thiserror::Error)]
+pub enum Error {
+    #[error("Failed to parse hex color: {0}")]
+    ParseHex(#[from] std::num::ParseIntError),
+}
+
+fn color_from_hex(
+    hex: &str,
+    blueprint: &catppuccin::Color,
+    capitalize_hex_strings: bool,
+) -> Result<Color, Error> {
+    let i = u32::from_str_radix(hex, 16)?;
+    let rgb = RGB {
+        r: ((i >> 16) & 0xff) as u8,
+        g: ((i >> 8) & 0xff) as u8,
+        b: (i & 0xff) as u8,
+    };
+    let hsl = css_colors::rgb(rgb.r, rgb.g, rgb.b).to_hsl();
+    let hex = if capitalize_hex_strings {
+        hex.to_uppercase()
+    } else {
+        hex.to_string()
+    };
+    Ok(Color {
+        name: blueprint.name.to_string(),
+        identifier: blueprint.name.identifier().to_string(),
+        accent: blueprint.accent,
+        hex,
+        rgb,
+        hsl: HSL {
+            h: hsl.h.degrees(),
+            s: hsl.s.as_f32(),
+            l: hsl.l.as_f32(),
+        },
+        opacity: 255,
+    })
+}
+
+fn color_from_catppuccin(color: &catppuccin::Color, capitalize_hex_strings: bool) -> Color {
+    let hex = {
         let hex = color.hex.to_string().trim_start_matches('#').to_string();
         if capitalize_hex_strings {
             hex.to_uppercase()
@@ -53,6 +91,57 @@ pub fn build_palette(capitalize_hex_strings: bool) -> Palette {
             hex
         }
     };
+    Color {
+        name: color.name.to_string(),
+        identifier: color.name.identifier().to_string(),
+        accent: color.accent,
+        hex,
+        rgb: RGB {
+            r: color.rgb.r,
+            g: color.rgb.g,
+            b: color.rgb.b,
+        },
+        hsl: HSL {
+            h: color.hsl.h.round() as u16,
+            s: color.hsl.s as f32,
+            l: color.hsl.l as f32,
+        },
+        opacity: 255,
+    }
+}
+
+/// Build a [`Palette`] from [`catppuccin::PALETTE`], optionally applying color overrides.
+pub fn build_palette(
+    capitalize_hex_strings: bool,
+    color_overrides: Option<&ColorOverrides>,
+) -> Result<Palette, Error> {
+    // make a `Color` from a `catppuccin::Color`, taking into account `color_overrides`.
+    // overrides apply in this order:
+    // 1. base color
+    // 2. "all" override
+    // 3. flavor override
+    let make_color =
+        |color: &catppuccin::Color, flavor_name: catppuccin::FlavorName| -> Result<Color, Error> {
+            let flavor_override = color_overrides
+                .map(|co| match flavor_name {
+                    catppuccin::FlavorName::Latte => &co.latte,
+                    catppuccin::FlavorName::Frappe => &co.frappe,
+                    catppuccin::FlavorName::Macchiato => &co.macchiato,
+                    catppuccin::FlavorName::Mocha => &co.mocha,
+                })
+                .and_then(|o| o.get(color.name.identifier()).cloned())
+                .map(|s| color_from_hex(&s, color, capitalize_hex_strings))
+                .transpose()?;
+
+            let all_override = color_overrides
+                .and_then(|co| co.all.get(color.name.identifier()).cloned())
+                .map(|s| color_from_hex(&s, color, capitalize_hex_strings))
+                .transpose()?;
+
+            Ok(flavor_override
+                .or(all_override)
+                .unwrap_or_else(|| color_from_catppuccin(color, capitalize_hex_strings)))
+        };
 
     let mut flavors = IndexMap::new();
     for flavor in &catppuccin::PALETTE {
@@ -60,23 +149,7 @@ pub fn build_palette(capitalize_hex_strings: bool) -> Palette {
         for color in flavor {
             colors.insert(
                 color.name.identifier().to_string(),
-                Color {
-                    name: color.name.to_string(),
-                    identifier: color.name.identifier().to_string(),
-                    accent: color.accent,
-                    hex: hex(color),
-                    rgb: RGB {
-                        r: color.rgb.r,
-                        g: color.rgb.g,
-                        b: color.rgb.b,
-                    },
-                    hsl: HSL {
-                        h: color.hsl.h.round() as u16,
-                        s: color.hsl.s as f32,
-                        l: color.hsl.l as f32,
-                    },
-                    opacity: 255,
-                },
+                make_color(color, flavor.name)?,
             );
         }
         flavors.insert(
@@ -90,7 +163,7 @@ pub fn build_palette(capitalize_hex_strings: bool) -> Palette {
             },
         );
     }
-    Palette { flavors }
+    Ok(Palette { flavors })
 }
 
 impl Palette {
