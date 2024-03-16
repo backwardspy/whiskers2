@@ -1,10 +1,12 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, path::Path};
 
 use catppuccin::FlavorName;
 use clap::Parser as _;
 use itertools::Itertools;
 use whiskers2::{
+    cli::Args,
     context::merge_values,
+    frontmatter,
     matrix::{self, Matrix},
     models, templating,
 };
@@ -48,32 +50,27 @@ impl TemplateOptions {
     }
 }
 
+fn template_name(args: &Args) -> String {
+    match &args.template.source {
+        clap_stdin::Source::Stdin => "template".to_string(),
+        clap_stdin::Source::Arg(arg) => Path::new(&arg).file_name().map_or_else(
+            || "template".to_string(),
+            |name| name.to_string_lossy().to_string(),
+        ),
+    }
+}
+
 fn main() -> anyhow::Result<()> {
     // parse command-line arguments & template frontmatter
-    let args = whiskers2::cli::Args::parse();
-    let doc = whiskers2::frontmatter::parse(&std::fs::read_to_string(&args.template_path)?)?;
+    let args = Args::parse();
+    let template_from_stdin = matches!(args.template.source, clap_stdin::Source::Stdin);
+    let template_name = template_name(&args);
+    let doc = frontmatter::parse(&args.template.contents()?)?;
     let template_opts =
         TemplateOptions::from_frontmatter(&doc.frontmatter, args.flavor.map(Into::into))?;
 
-    // check that the template is compatible with this version of Whiskers
-    let whiskers_version = semver::Version::parse(env!("CARGO_PKG_VERSION"))?;
-    if let Some(template_version) = template_opts.version {
-        if !template_version.matches(&whiskers_version) {
-            anyhow::bail!(
-                "Template requires whiskers version {template_version}, but we're running {whiskers_version}",
-            );
-        }
-    } else {
-        eprintln!("Warning: No Whiskers version requirement specified in template.");
-        eprintln!("This template may not be compatible with this version of Whiskers.");
-        eprintln!();
-        eprintln!("To fix this, add the minimum supported Whiskers version to the template frontmatter as follows:");
-        eprintln!();
-        eprintln!("---");
-        eprintln!("whiskers:");
-        eprintln!("    version: \"{whiskers_version}\"");
-        eprintln!("---");
-        eprintln!();
+    if !template_from_stdin {
+        verify_template_compatiblity(&template_opts)?;
     }
 
     // merge frontmatter with command-line overrides and add to Tera context
@@ -95,10 +92,6 @@ fn main() -> anyhow::Result<()> {
 
     // build the Tera engine and palette
     let mut tera = templating::make_engine();
-    let template_name = args.template_path.file_name().map_or_else(
-        || "template".to_string(),
-        |name| name.to_string_lossy().to_string(),
-    );
     tera.add_raw_template(&template_name, &doc.body)?;
     let palette = models::build_palette(
         args.capitalize_hex,
@@ -132,6 +125,29 @@ fn main() -> anyhow::Result<()> {
         )?;
     }
 
+    Ok(())
+}
+
+fn verify_template_compatiblity(template_opts: &TemplateOptions) -> Result<(), anyhow::Error> {
+    let whiskers_version = semver::Version::parse(env!("CARGO_PKG_VERSION"))?;
+    if let Some(template_version) = &template_opts.version {
+        if !template_version.matches(&whiskers_version) {
+            anyhow::bail!(
+            "Template requires whiskers version {template_version}, but we're running {whiskers_version}",
+        );
+        }
+    } else {
+        eprintln!("Warning: No Whiskers version requirement specified in template.");
+        eprintln!("This template may not be compatible with this version of Whiskers.");
+        eprintln!();
+        eprintln!("To fix this, add the minimum supported Whiskers version to the template frontmatter as follows:");
+        eprintln!();
+        eprintln!("---");
+        eprintln!("whiskers:");
+        eprintln!("    version: \"{whiskers_version}\"");
+        eprintln!("---");
+        eprintln!();
+    };
     Ok(())
 }
 

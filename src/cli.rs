@@ -1,16 +1,14 @@
-use std::{
-    collections::HashMap,
-    path::{Path, PathBuf},
-};
+use std::{collections::HashMap, path::Path};
 
 use clap::Parser;
+use clap_stdin::FileOrStdin;
 
 type ValueMap = HashMap<String, serde_json::Value>;
 
 #[derive(Parser, Debug)]
 #[command(version, about)]
 pub struct Args {
-    pub template_path: PathBuf,
+    pub template: FileOrStdin,
 
     #[arg(long, short, help = "Render a single flavor instead of all four")]
     pub flavor: Option<Flavor>,
