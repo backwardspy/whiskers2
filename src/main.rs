@@ -5,9 +5,9 @@ use catppuccin::FlavorName;
 use clap::Parser as _;
 use itertools::Itertools;
 use whiskers2::{
-    cli::Args,
+    cli::{Args, OutputFormat},
     context::merge_values,
-    frontmatter,
+    frontmatter, markdown,
     matrix::{self, Matrix},
     models, templating,
 };
@@ -61,24 +61,22 @@ impl TemplateOptions {
     }
 }
 
-fn template_name(args: &Args) -> String {
-    match &args.template.source {
-        clap_stdin::Source::Stdin => "template".to_string(),
-        clap_stdin::Source::Arg(arg) => Path::new(&arg).file_name().map_or_else(
-            || "template".to_string(),
-            |name| name.to_string_lossy().to_string(),
-        ),
-    }
-}
-
 fn main() -> anyhow::Result<()> {
     // parse command-line arguments & template frontmatter
     let args = Args::parse();
-    let template_from_stdin = matches!(args.template.source, clap_stdin::Source::Stdin);
-    let template_name = template_name(&args);
+
+    if args.list_functions {
+        list_functions(args.output_format);
+        return Ok(());
+    }
+
+    let template = args
+        .template
+        .expect("args.template is guaranteed by clap to be set");
+    let template_from_stdin = matches!(template.source, clap_stdin::Source::Stdin);
+    let template_name = template_name(&template);
     let doc = frontmatter::parse(
-        &args
-            .template
+        &template
             .contents()
             .context("Template contents could not be read")?,
     )
@@ -148,6 +146,48 @@ fn main() -> anyhow::Result<()> {
     }
 
     Ok(())
+}
+
+#[allow(clippy::too_many_lines)]
+fn list_functions(format: OutputFormat) {
+    match format {
+        OutputFormat::Json | OutputFormat::Yaml => {
+            let output = serde_json::json!({
+                "functions": templating::all_functions(),
+                "filters": templating::all_filters()
+            });
+            println!(
+                "{}",
+                if matches!(format, OutputFormat::Json) {
+                    serde_json::to_string_pretty(&output).expect("output is guaranteed to be valid")
+                } else {
+                    serde_yaml::to_string(&output).expect("output is guaranteed to be valid")
+                }
+            );
+        }
+        OutputFormat::Markdown => {
+            println!(
+                "{}",
+                markdown::format_filters_and_functions(markdown::Format::List)
+            );
+        }
+        OutputFormat::MarkdownTable => {
+            println!(
+                "{}",
+                markdown::format_filters_and_functions(markdown::Format::Table)
+            );
+        }
+    }
+}
+
+fn template_name(template: &clap_stdin::FileOrStdin) -> String {
+    match &template.source {
+        clap_stdin::Source::Stdin => "template".to_string(),
+        clap_stdin::Source::Arg(arg) => Path::new(&arg).file_name().map_or_else(
+            || "template".to_string(),
+            |name| name.to_string_lossy().to_string(),
+        ),
+    }
 }
 
 fn template_is_compatible(template_opts: &TemplateOptions) -> bool {

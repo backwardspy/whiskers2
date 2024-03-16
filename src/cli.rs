@@ -8,7 +8,11 @@ type ValueMap = HashMap<String, serde_json::Value>;
 #[derive(Parser, Debug)]
 #[command(version, about)]
 pub struct Args {
-    pub template: FileOrStdin,
+    #[arg(
+        required_unless_present = "list_functions",
+        help = "Path to the template file or - for stdin"
+    )]
+    pub template: Option<FileOrStdin>,
 
     #[arg(long, short, help = "Render a single flavor instead of all four")]
     pub flavor: Option<Flavor>,
@@ -21,6 +25,17 @@ pub struct Args {
 
     #[arg(long, help = "Dry run, don't write anything to disk")]
     pub dry_run: bool,
+
+    #[arg(short, long, help = "List all Tera filters and functions")]
+    pub list_functions: bool,
+
+    #[arg(
+        short,
+        long,
+        default_value = "json",
+        help = "Output format of --list-functions"
+    )]
+    pub output_format: OutputFormat,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -70,6 +85,14 @@ pub struct ColorOverrides {
     pub macchiato: HashMap<String, String>,
     #[serde(default)]
     pub mocha: HashMap<String, String>,
+}
+
+#[derive(Clone, Copy, Debug, clap::ValueEnum)]
+pub enum OutputFormat {
+    Json,
+    Yaml,
+    Markdown,
+    MarkdownTable,
 }
 
 fn json_map<T>(s: &str) -> Result<T, Error>
