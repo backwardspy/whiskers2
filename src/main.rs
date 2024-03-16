@@ -1,5 +1,6 @@
 use std::{collections::HashMap, path::Path};
 
+use anyhow::Context as _;
 use catppuccin::FlavorName;
 use clap::Parser as _;
 use itertools::Itertools;
@@ -18,6 +19,9 @@ struct TemplateOptions {
     version: Option<semver::VersionReq>,
     matrix: Option<Matrix>,
     filename: Option<String>,
+    hex_prefix: Option<String>,
+    #[serde(default)]
+    capitalize_hex: bool,
 }
 
 impl TemplateOptions {
@@ -31,18 +35,25 @@ impl TemplateOptions {
             version: Option<semver::VersionReq>,
             matrix: Option<Vec<tera::Value>>,
             filename: Option<String>,
+            hex_prefix: Option<String>,
+            #[serde(default)]
+            capitalize_hex: bool,
         }
 
         if let Some(opts) = frontmatter.get(FRONTMATTER_OPTIONS_SECTION) {
-            let opts: RawTemplateOptions = tera::from_value(opts.clone())?;
+            let opts: RawTemplateOptions = tera::from_value(opts.clone())
+                .context("Frontmatter `whiskers` section is invalid")?;
             let matrix = opts
                 .matrix
                 .map(|m| matrix::from_values(m, only_flavor))
-                .transpose()?;
+                .transpose()
+                .context("Frontmatter matrix is invalid")?;
             Ok(Self {
                 version: opts.version,
                 matrix,
                 filename: opts.filename,
+                hex_prefix: opts.hex_prefix,
+                capitalize_hex: opts.capitalize_hex,
             })
         } else {
             Ok(Self::default())
@@ -65,24 +76,34 @@ fn main() -> anyhow::Result<()> {
     let args = Args::parse();
     let template_from_stdin = matches!(args.template.source, clap_stdin::Source::Stdin);
     let template_name = template_name(&args);
-    let doc = frontmatter::parse(&args.template.contents()?)?;
+    let doc = frontmatter::parse(
+        &args
+            .template
+            .contents()
+            .context("Template contents could not be read")?,
+    )
+    .context("Frontmatter is invalid")?;
     let template_opts =
-        TemplateOptions::from_frontmatter(&doc.frontmatter, args.flavor.map(Into::into))?;
+        TemplateOptions::from_frontmatter(&doc.frontmatter, args.flavor.map(Into::into))
+            .context("Could not get template options from frontmatter")?;
 
-    if !template_from_stdin {
-        verify_template_compatiblity(&template_opts)?;
+    if !template_from_stdin && !template_is_compatible(&template_opts) {
+        std::process::exit(1);
     }
 
     // merge frontmatter with command-line overrides and add to Tera context
     let mut frontmatter = doc.frontmatter;
     if let Some(overrides) = args.overrides {
-        for (key, value) in overrides {
+        for (key, value) in &overrides {
             frontmatter
-                .entry(key)
+                .entry(key.clone())
                 .and_modify(|v| {
-                    *v = merge_values(v, &value);
+                    *v = merge_values(v, value);
                 })
-                .or_insert(tera::to_value(value)?);
+                .or_insert(
+                    tera::to_value(value)
+                        .with_context(|| format!("Value of {key} override is invalid"))?,
+                );
         }
     }
     let mut ctx = tera::Context::new();
@@ -92,19 +113,20 @@ fn main() -> anyhow::Result<()> {
 
     // build the Tera engine and palette
     let mut tera = templating::make_engine();
-    tera.add_raw_template(&template_name, &doc.body)?;
+    tera.add_raw_template(&template_name, &doc.body)
+        .context("Template is invalid")?;
     let palette = models::build_palette(
-        args.capitalize_hex,
-        args.hex_prefix.as_deref(),
+        template_opts.capitalize_hex,
+        template_opts.hex_prefix.as_deref(),
         args.color_overrides.as_ref(),
-    )?;
+    )
+    .context("Palette context cannot be built")?;
 
-    // if a matrix is provided, we're doing a multi-file render
     if let Some(matrix) = template_opts.matrix {
         let Some(filename_template) = template_opts.filename else {
-            anyhow::bail!("Filename template is required for multi-file render");
+            anyhow::bail!("Filename template is required for multi-output render");
         };
-        render_multi_file(
+        render_multi_output(
             matrix,
             &filename_template,
             &ctx,
@@ -112,29 +134,29 @@ fn main() -> anyhow::Result<()> {
             &tera,
             &template_name,
             args.dry_run,
-        )?;
-    }
-    // otherwise, we're doing a single-file render
-    else {
-        render_single_file(
+        )
+        .context("Multi-output render failed")?;
+    } else {
+        render_single_output(
             args.flavor.map(Into::into),
             &ctx,
             &palette,
             &tera,
             &template_name,
-        )?;
+        )
+        .context("Single-output render failed")?;
     }
 
     Ok(())
 }
 
-fn verify_template_compatiblity(template_opts: &TemplateOptions) -> Result<(), anyhow::Error> {
-    let whiskers_version = semver::Version::parse(env!("CARGO_PKG_VERSION"))?;
+fn template_is_compatible(template_opts: &TemplateOptions) -> bool {
+    let whiskers_version = semver::Version::parse(env!("CARGO_PKG_VERSION"))
+        .expect("CARGO_PKG_VERSION is always valid");
     if let Some(template_version) = &template_opts.version {
         if !template_version.matches(&whiskers_version) {
-            anyhow::bail!(
-            "Template requires whiskers version {template_version}, but we're running {whiskers_version}",
-        );
+            eprintln!("Template requires whiskers version {template_version}, but you are running whiskers {whiskers_version}");
+            return false;
         }
     } else {
         eprintln!("Warning: No Whiskers version requirement specified in template.");
@@ -148,10 +170,11 @@ fn verify_template_compatiblity(template_opts: &TemplateOptions) -> Result<(), a
         eprintln!("---");
         eprintln!();
     };
-    Ok(())
+
+    true
 }
 
-fn render_single_file(
+fn render_single_output(
     flavor: Option<FlavorName>,
     ctx: &tera::Context,
     palette: &models::Palette,
@@ -169,12 +192,14 @@ fn render_single_file(
             ctx.insert(&color.identifier, &color);
         }
     }
-    let result = tera.render(template_name, &ctx)?;
+    let result = tera
+        .render(template_name, &ctx)
+        .context("Template render failed")?;
     print!("{result}");
     Ok(())
 }
 
-fn render_multi_file(
+fn render_multi_output(
     matrix: HashMap<String, Vec<String>>,
     filename_template: &str,
     ctx: &tera::Context,
@@ -203,8 +228,11 @@ fn render_multi_file(
                 ctx.insert(key, &value);
             }
         }
-        let result = tera.render(template_name, &ctx)?;
-        let filename = tera::Tera::one_off(filename_template, &ctx, false)?;
+        let result = tera
+            .render(template_name, &ctx)
+            .context("Main template render failed")?;
+        let filename = tera::Tera::one_off(filename_template, &ctx, false)
+            .context("Filename template render failed")?;
 
         if dry_run || cfg!(test) {
             println!(
@@ -212,7 +240,8 @@ fn render_multi_file(
                 result.as_bytes().len()
             );
         } else {
-            std::fs::write(filename, result)?;
+            std::fs::write(&filename, result)
+                .with_context(|| format!("Couldn't write to {filename}"))?;
         }
     }
 

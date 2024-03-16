@@ -19,12 +19,6 @@ pub struct Args {
     #[arg(long, help = "Set frontmatter overrides", value_parser = json_map::<ValueMap>)]
     pub overrides: Option<ValueMap>,
 
-    #[arg(long, help = "Capitalize hex strings")]
-    pub capitalize_hex: bool,
-
-    #[arg(long, help = "Add a prefix to hex strings")]
-    pub hex_prefix: Option<String>,
-
     #[arg(long, help = "Dry run, don't write anything to disk")]
     pub dry_run: bool,
 }
