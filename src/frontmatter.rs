@@ -39,13 +39,10 @@ fn split(template: &str) -> Option<(&str, &str)> {
     // we consider a template to possibly have frontmatter iff:
     // * line 0 is "---"
     // * there is another "---" on another line
-    let template = template.trim();
-    let sep = "---";
+    let sep = "---\n";
     if !template.starts_with(sep) {
         return None;
     }
 
-    template[sep.len()..]
-        .split_once(sep)
-        .map(|(a, b)| (a.trim(), b.trim()))
+    template[sep.len()..].split_once(sep)
 }

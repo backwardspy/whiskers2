@@ -100,7 +100,11 @@ fn main() -> anyhow::Result<()> {
         |name| name.to_string_lossy().to_string(),
     );
     tera.add_raw_template(&template_name, &doc.body)?;
-    let palette = models::build_palette(args.hexcaps, args.color_overrides.as_ref())?;
+    let palette = models::build_palette(
+        args.capitalize_hex,
+        args.hex_prefix.as_deref(),
+        args.color_overrides.as_ref(),
+    )?;
 
     // if a matrix is provided, we're doing a multi-file render
     if let Some(matrix) = template_opts.matrix {

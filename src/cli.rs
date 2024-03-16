@@ -5,6 +5,48 @@ use std::{
 
 use clap::Parser;
 
+type ValueMap = HashMap<String, serde_json::Value>;
+
+#[derive(Parser, Debug)]
+#[command(version, about)]
+pub struct Args {
+    pub template_path: PathBuf,
+
+    #[arg(long, short, help = "Render a single flavor instead of all four")]
+    pub flavor: Option<Flavor>,
+
+    #[arg(long, help = "Set color overrides", value_parser = json_map::<ColorOverrides>)]
+    pub color_overrides: Option<ColorOverrides>,
+
+    #[arg(long, help = "Set frontmatter overrides", value_parser = json_map::<ValueMap>)]
+    pub overrides: Option<ValueMap>,
+
+    #[arg(long, help = "Capitalize hex strings")]
+    pub capitalize_hex: bool,
+
+    #[arg(long, help = "Add a prefix to hex strings")]
+    pub hex_prefix: Option<String>,
+
+    #[arg(long, help = "Dry run, don't write anything to disk")]
+    pub dry_run: bool,
+}
+
+#[derive(Debug, thiserror::Error)]
+enum Error {
+    #[error("Invalid JSON literal argument: {message}")]
+    InvalidJsonLiteralArg { message: String },
+
+    #[error("Invalid JSON file argument: {message}")]
+    InvalidJsonFileArg { message: String },
+
+    #[error("Failed to read file: {path}")]
+    ReadFile {
+        path: String,
+        #[source]
+        source: std::io::Error,
+    },
+}
+
 #[derive(Copy, Clone, Debug, clap::ValueEnum)]
 pub enum Flavor {
     Latte,
@@ -22,22 +64,6 @@ impl From<Flavor> for catppuccin::FlavorName {
             Flavor::Mocha => Self::Mocha,
         }
     }
-}
-
-#[derive(Debug, thiserror::Error)]
-enum Error {
-    #[error("Invalid JSON literal argument: {message}")]
-    InvalidJsonLiteralArg { message: String },
-
-    #[error("Invalid JSON file argument: {message}")]
-    InvalidJsonFileArg { message: String },
-
-    #[error("Failed to read file: {path}")]
-    ReadFile {
-        path: String,
-        #[source]
-        source: std::io::Error,
-    },
 }
 
 #[derive(Clone, Debug, serde::Deserialize)]
@@ -71,27 +97,4 @@ where
             message: e.to_string(),
         })
     }
-}
-
-type ValueMap = HashMap<String, serde_json::Value>;
-
-#[derive(Parser, Debug)]
-#[command(version, about)]
-pub struct Args {
-    pub template_path: PathBuf,
-
-    #[arg(long, short, help = "Render a single flavor instead of all four")]
-    pub flavor: Option<Flavor>,
-
-    #[arg(long, help = "Set color overrides", value_parser = json_map::<ColorOverrides>)]
-    pub color_overrides: Option<ColorOverrides>,
-
-    #[arg(long, help = "Set frontmatter overrides", value_parser = json_map::<ValueMap>)]
-    pub overrides: Option<ValueMap>,
-
-    #[arg(long, help = "Capitalize hex s")]
-    pub hexcaps: bool,
-
-    #[arg(long, help = "Dry run, don't write anything to disk")]
-    pub dry_run: bool,
 }

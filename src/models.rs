@@ -50,10 +50,26 @@ pub enum Error {
     ParseHex(#[from] std::num::ParseIntError),
 }
 
+/// attempt to canonicalize a hex string, optionally capitalizing it and adding a prefix.
+fn format_hex(hex: &str, capitalize_hex_strings: bool, hex_prefix: Option<&str>) -> String {
+    let hex = hex.trim_start_matches('#');
+    let hex = if capitalize_hex_strings {
+        hex.to_uppercase()
+    } else {
+        hex.to_string()
+    };
+    if let Some(prefix) = hex_prefix {
+        format!("{prefix}{hex}")
+    } else {
+        hex
+    }
+}
+
 fn color_from_hex(
     hex: &str,
     blueprint: &catppuccin::Color,
     capitalize_hex_strings: bool,
+    hex_prefix: Option<&str>,
 ) -> Result<Color, Error> {
     let i = u32::from_str_radix(hex, 16)?;
     let rgb = RGB {
@@ -62,11 +78,7 @@ fn color_from_hex(
         b: (i & 0xff) as u8,
     };
     let hsl = css_colors::rgb(rgb.r, rgb.g, rgb.b).to_hsl();
-    let hex = if capitalize_hex_strings {
-        hex.to_uppercase()
-    } else {
-        hex.to_string()
-    };
+    let hex = format_hex(hex, capitalize_hex_strings, hex_prefix);
     Ok(Color {
         name: blueprint.name.to_string(),
         identifier: blueprint.name.identifier().to_string(),
@@ -82,15 +94,12 @@ fn color_from_hex(
     })
 }
 
-fn color_from_catppuccin(color: &catppuccin::Color, capitalize_hex_strings: bool) -> Color {
-    let hex = {
-        let hex = color.hex.to_string().trim_start_matches('#').to_string();
-        if capitalize_hex_strings {
-            hex.to_uppercase()
-        } else {
-            hex
-        }
-    };
+fn color_from_catppuccin(
+    color: &catppuccin::Color,
+    capitalize_hex_strings: bool,
+    hex_prefix: Option<&str>,
+) -> Color {
+    let hex = format_hex(&color.hex.to_string(), capitalize_hex_strings, hex_prefix);
     Color {
         name: color.name.to_string(),
         identifier: color.name.identifier().to_string(),
@@ -113,6 +122,7 @@ fn color_from_catppuccin(color: &catppuccin::Color, capitalize_hex_strings: bool
 /// Build a [`Palette`] from [`catppuccin::PALETTE`], optionally applying color overrides.
 pub fn build_palette(
     capitalize_hex_strings: bool,
+    hex_prefix: Option<&str>,
     color_overrides: Option<&ColorOverrides>,
 ) -> Result<Palette, Error> {
     // make a `Color` from a `catppuccin::Color`, taking into account `color_overrides`.
@@ -130,17 +140,17 @@ pub fn build_palette(
                     catppuccin::FlavorName::Mocha => &co.mocha,
                 })
                 .and_then(|o| o.get(color.name.identifier()).cloned())
-                .map(|s| color_from_hex(&s, color, capitalize_hex_strings))
+                .map(|s| color_from_hex(&s, color, capitalize_hex_strings, hex_prefix))
                 .transpose()?;
 
             let all_override = color_overrides
                 .and_then(|co| co.all.get(color.name.identifier()).cloned())
-                .map(|s| color_from_hex(&s, color, capitalize_hex_strings))
+                .map(|s| color_from_hex(&s, color, capitalize_hex_strings, hex_prefix))
                 .transpose()?;
 
-            Ok(flavor_override
-                .or(all_override)
-                .unwrap_or_else(|| color_from_catppuccin(color, capitalize_hex_strings)))
+            Ok(flavor_override.or(all_override).unwrap_or_else(|| {
+                color_from_catppuccin(color, capitalize_hex_strings, hex_prefix)
+            }))
         };
 
     let mut flavors = IndexMap::new();

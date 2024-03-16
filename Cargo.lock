@@ -1103,7 +1103,7 @@ checksum = "af190c94f2773fdb3729c55b007a722abb5384da03bc0986df4c289bf5567e96"
 
 [[package]]
 name = "whiskers2"
-version = "2.4.3"
+version = "2.0.0"
 dependencies = [
  "anyhow",
  "assert_cmd",
