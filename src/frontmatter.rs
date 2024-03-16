@@ -8,8 +8,12 @@ pub struct Document {
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
-    #[error("YAML error: {0}")]
-    Yaml(#[from] serde_yaml::Error),
+    #[error("Invalid YAML frontmatter (L{line}:{column}) : {message}")]
+    InvalidYaml {
+        line: usize,
+        column: usize,
+        message: String,
+    },
 }
 
 pub fn parse(input: &str) -> Result<Document, Error> {
@@ -22,7 +26,11 @@ pub fn parse(input: &str) -> Result<Document, Error> {
     };
 
     Ok(Document {
-        frontmatter: serde_yaml::from_str(frontmatter)?,
+        frontmatter: serde_yaml::from_str(frontmatter).map_err(|e| Error::InvalidYaml {
+            line: e.location().map(|l| l.line()).unwrap_or_default(),
+            column: e.location().map(|l| l.column()).unwrap_or_default(),
+            message: e.to_string(),
+        })?,
         body: body.to_string(),
     })
 }

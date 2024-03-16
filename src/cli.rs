@@ -26,11 +26,18 @@ impl From<Flavor> for catppuccin::FlavorName {
 
 #[derive(Debug, thiserror::Error)]
 enum Error {
-    #[error(transparent)]
-    Json(#[from] serde_json::Error),
+    #[error("Invalid JSON literal argument: {message}")]
+    InvalidJsonLiteralArg { message: String },
 
-    #[error(transparent)]
-    Io(#[from] std::io::Error),
+    #[error("Invalid JSON file argument: {message}")]
+    InvalidJsonFileArg { message: String },
+
+    #[error("Failed to read file: {path}")]
+    ReadFile {
+        path: String,
+        #[source]
+        source: std::io::Error,
+    },
 }
 
 #[derive(Clone, Debug, serde::Deserialize)]
@@ -52,10 +59,17 @@ where
     T: serde::de::DeserializeOwned,
 {
     if Path::new(s).is_file() {
-        let s = std::fs::read_to_string(s)?;
-        serde_json::from_str(&s).map_err(Into::into)
+        let s = std::fs::read_to_string(s).map_err(|e| Error::ReadFile {
+            path: s.to_string(),
+            source: e,
+        })?;
+        serde_json::from_str(&s).map_err(|e| Error::InvalidJsonFileArg {
+            message: e.to_string(),
+        })
     } else {
-        serde_json::from_str(s).map_err(Into::into)
+        serde_json::from_str(s).map_err(|e| Error::InvalidJsonLiteralArg {
+            message: e.to_string(),
+        })
     }
 }
 

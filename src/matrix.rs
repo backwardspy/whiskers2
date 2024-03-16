@@ -6,17 +6,14 @@ pub type Matrix = HashMap<String, Vec<String>>;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
-    #[error("unknown magic iterable: {0}")]
-    UnknownIterable(String),
+    #[error("Unknown magic iterable: {name}")]
+    UnknownIterable { name: String },
 
-    #[error("invalid matrix array object element: must have a single key and an array of strings as value")]
+    #[error("Invalid matrix array object element: must have a single key and an array of strings as value")]
     InvalidObjectElement,
 
-    #[error("invalid matrix array element: must be a string or object")]
+    #[error("Invalid matrix array element: must be a string or object")]
     InvalidElement,
-
-    #[error(transparent)]
-    Json(#[from] serde_json::Error),
 }
 
 // matrix in frontmatter is a list of strings or objects.
@@ -33,12 +30,13 @@ pub fn from_values(
             tera::Value::String(s) => {
                 let iterable = iterables
                     .get(s.as_str())
-                    .ok_or(Error::UnknownIterable(s.clone()))?;
+                    .ok_or(Error::UnknownIterable { name: s.clone() })?;
                 Ok((s, iterable.clone()))
             }
             tera::Value::Object(o) => {
                 let (key, value) = o.into_iter().next().ok_or(Error::InvalidObjectElement)?;
-                let value: Vec<String> = tera::from_value(value)?;
+                let value: Vec<String> =
+                    tera::from_value(value).map_err(|_| Error::InvalidObjectElement)?;
                 Ok((key, value))
             }
             _ => Err(Error::InvalidElement),
