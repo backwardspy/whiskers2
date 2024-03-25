@@ -1,6 +1,12 @@
-use std::{collections::HashMap, path::Path};
+use std::{
+    collections::HashMap,
+    env,
+    io::Write as _,
+    path::{Path, PathBuf},
+    process,
+};
 
-use anyhow::Context as _;
+use anyhow::{anyhow, Context as _};
 use catppuccin::FlavorName;
 use clap::Parser as _;
 use itertools::Itertools;
@@ -132,15 +138,23 @@ fn main() -> anyhow::Result<()> {
             &tera,
             &template_name,
             args.dry_run,
+            args.check.is_some(),
         )
         .context("Multi-output render failed")?;
     } else {
+        let check = args
+            .check
+            .map(|c| {
+                c.ok_or_else(|| anyhow!("--check requires a file argument in single-output mode"))
+            })
+            .transpose()?;
         render_single_output(
             args.flavor.map(Into::into),
             &ctx,
             &palette,
             &tera,
             &template_name,
+            check,
         )
         .context("Single-output render failed")?;
     }
@@ -220,6 +234,7 @@ fn render_single_output(
     palette: &models::Palette,
     tera: &tera::Tera,
     template_name: &str,
+    check: Option<PathBuf>,
 ) -> Result<(), anyhow::Error> {
     let mut ctx = ctx.clone();
     ctx.insert("flavors", &palette.flavors);
@@ -232,10 +247,17 @@ fn render_single_output(
             ctx.insert(&color.identifier, &color);
         }
     }
+
     let result = tera
         .render(template_name, &ctx)
         .context("Template render failed")?;
-    print!("{result}");
+
+    if let Some(path) = check {
+        check_result_with_file(&path, &result).context("Check mode failed")?;
+    } else {
+        print!("{result}");
+    }
+
     Ok(())
 }
 
@@ -247,6 +269,7 @@ fn render_multi_output(
     tera: &tera::Tera,
     template_name: &str,
     dry_run: bool,
+    check: bool,
 ) -> Result<(), anyhow::Error> {
     let iterables = matrix
         .into_iter()
@@ -279,10 +302,52 @@ fn render_multi_output(
                 "Would write {} bytes into {filename}",
                 result.as_bytes().len()
             );
+        } else if check {
+            check_result_with_file(&filename, &result).context("Check mode failed")?;
         } else {
             std::fs::write(&filename, result)
                 .with_context(|| format!("Couldn't write to {filename}"))?;
         }
+    }
+
+    Ok(())
+}
+
+fn check_result_with_file<P>(path: &P, result: &str) -> Result<(), anyhow::Error>
+where
+    P: AsRef<Path>,
+{
+    let path = path.as_ref();
+    let expected = std::fs::read_to_string(path).with_context(|| {
+        format!(
+            "Couldn't read {} for comparison against result",
+            path.display()
+        )
+    })?;
+    if *result != expected {
+        eprintln!("Output does not match {}", path.display());
+        invoke_difftool(result, path)?;
+        std::process::exit(1);
+    }
+    Ok(())
+}
+
+fn invoke_difftool<P>(actual: &str, expected_path: P) -> Result<(), anyhow::Error>
+where
+    P: AsRef<Path>,
+{
+    let expected_path = expected_path.as_ref();
+    let tool = env::var("DIFFTOOL").unwrap_or_else(|_| "diff".to_string());
+
+    let mut actual_file = tempfile::NamedTempFile::new()?;
+    write!(&mut actual_file, "{actual}")?;
+    if let Ok(mut child) = process::Command::new(tool)
+        .args([actual_file.path(), &expected_path])
+        .spawn()
+    {
+        child.wait()?;
+    } else {
+        eprintln!("warning: Can't display diff, try setting $DIFFTOOL.");
     }
 
     Ok(())

@@ -1,4 +1,7 @@
-use std::{collections::HashMap, path::Path};
+use std::{
+    collections::HashMap,
+    path::{Path, PathBuf},
+};
 
 use clap::Parser;
 use clap_stdin::FileOrStdin;
@@ -8,33 +11,40 @@ type ValueMap = HashMap<String, serde_json::Value>;
 #[derive(Parser, Debug)]
 #[command(version, about)]
 pub struct Args {
-    #[arg(
-        required_unless_present = "list_functions",
-        help = "Path to the template file or - for stdin"
-    )]
+    /// Path to the template file, or - for stdin
+    #[arg(required_unless_present = "list_functions")]
     pub template: Option<FileOrStdin>,
 
-    #[arg(long, short, help = "Render a single flavor instead of all four")]
+    /// Render a single flavor instead of all four
+    #[arg(long, short)]
     pub flavor: Option<Flavor>,
 
-    #[arg(long, help = "Set color overrides", value_parser = json_map::<ColorOverrides>)]
+    /// Set color overrides
+    #[arg(long, value_parser = json_map::<ColorOverrides>)]
     pub color_overrides: Option<ColorOverrides>,
 
-    #[arg(long, help = "Set frontmatter overrides", value_parser = json_map::<ValueMap>)]
+    /// Set frontmatter overrides
+    #[arg(long, value_parser = json_map::<ValueMap>)]
     pub overrides: Option<ValueMap>,
 
-    #[arg(long, help = "Dry run, don't write anything to disk")]
+    /// Instead of creating an output, check it against an example
+    ///
+    /// In single-output mode, a path to the example file must be provided.
+    /// In multi-output mode, no path is required and, if one is provided, it
+    /// will be ignored.
+    #[arg(long, value_name = "EXAMPLE_PATH")]
+    pub check: Option<Option<PathBuf>>,
+
+    /// Dry run, don't write anything to disk
+    #[arg(long)]
     pub dry_run: bool,
 
-    #[arg(short, long, help = "List all Tera filters and functions")]
+    /// List all Tera filters and functions
+    #[arg(short, long)]
     pub list_functions: bool,
 
-    #[arg(
-        short,
-        long,
-        default_value = "json",
-        help = "Output format of --list-functions"
-    )]
+    /// Output format of --list-functions
+    #[arg(short, long, default_value = "json")]
     pub output_format: OutputFormat,
 }
 
